@@ -82,7 +82,7 @@ runs:
       shell: bash
       run: cd cdk && bun install --frozen-lockfile
       env:
-        GITHUB_TOKEN_PULSARANVIL: ${{ steps.app-token.outputs.token }}
+        GITHUB_TOKEN_PULSARANVIL: ${{ github.token }}
 
     - name: CDK deploy
       shell: bash
