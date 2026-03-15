@@ -1,0 +1,92 @@
+name: "Cargo Lambda Deploy"
+description: "Build Rust Lambda functions and deploy via CDK"
+
+inputs:
+  environment:
+    description: "Target environment (dev, staging, prod)"
+    required: true
+  aws-role-arn:
+    description: "AWS OIDC deploy role ARN"
+    required: true
+  aws-region:
+    description: "AWS region"
+    required: false
+    default: "eu-west-3"
+  account-id:
+    description: "Target AWS account ID"
+    required: true
+  github-app-id:
+    description: "GitHub App ID for private repo access"
+    required: true
+  github-app-pem:
+    description: "GitHub App PEM private key"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-pem }}
+        owner: Pulsar-Anvil-Studios
+
+    - name: Configure git for private deps
+      shell: bash
+      run: |
+        git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-unknown-linux-gnu
+
+    - name: Install cargo-lambda
+      shell: bash
+      run: pip install cargo-lambda==1.9.1
+
+    - name: Build Lambda functions
+      shell: bash
+      env:
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: cargo lambda build --release --arm64 --locked
+
+    - name: Configure AWS credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Assume target account role
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/TerraformDeployRole
+        aws-region: ${{ inputs.aws-region }}
+        role-chaining: true
+
+    - name: Verify AWS account
+      shell: bash
+      run: |
+        ACTUAL=$(aws sts get-caller-identity --query Account --output text)
+        if [ "$ACTUAL" != "${{ inputs.account-id }}" ]; then
+          echo "::error::Expected account ${{ inputs.account-id }}, got $ACTUAL"
+          exit 1
+        fi
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install CDK dependencies
+      shell: bash
+      run: cd cdk && bun install --frozen-lockfile
+      env:
+        GITHUB_TOKEN_PULSARANVIL: ${{ steps.app-token.outputs.token }}
+
+    - name: CDK deploy
+      shell: bash
+      run: cd cdk && bunx cdk deploy -c env=${{ inputs.environment }} --require-approval never
+      env:
+        CDK_DEFAULT_ACCOUNT: ${{ inputs.account-id }}
+        CDK_DEFAULT_REGION: ${{ inputs.aws-region }}
