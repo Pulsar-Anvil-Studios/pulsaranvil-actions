@@ -27,7 +27,7 @@ runs:
   steps:
     - name: Generate GitHub App token
       id: app-token
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3
       with:
         app-id: ${{ inputs.github-app-id }}
         private-key: ${{ inputs.github-app-pem }}
@@ -54,13 +54,13 @@ runs:
       run: cargo lambda build --release --arm64 --locked
 
     - name: Configure AWS credentials (OIDC)
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: ${{ inputs.aws-role-arn }}
         aws-region: ${{ inputs.aws-region }}
 
     - name: Assume target account role
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/TerraformDeployRole
         aws-region: ${{ inputs.aws-region }}
