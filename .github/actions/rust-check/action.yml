@@ -45,6 +45,13 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
+    - name: Install mold linker
+      shell: bash
+      run: sudo apt-get install -y mold
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Cache cargo
       uses: actions/cache@v5
       with:
@@ -73,7 +80,7 @@ runs:
         CARGO_TERM_COLOR: always
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       run: |
-        cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info \
+        cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info \
           --ignore-filename-regex 'lambdas/.*/src/main\.rs'
 
     - name: Diff coverage (PR only)
