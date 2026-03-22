@@ -1,0 +1,93 @@
+name: "Rust Coverage"
+description: "Test coverage with cargo-llvm-cov, diff-coverage for PRs, and global threshold enforcement"
+
+inputs:
+  coverage-threshold:
+    description: "Minimum line coverage percentage"
+    required: false
+    default: "98"
+  github-app-id:
+    description: "GitHub App ID for private repo access"
+    required: true
+  github-app-pem:
+    description: "GitHub App PEM private key"
+    required: true
+  pr-number:
+    description: "PR number (for diff-coverage comment). Empty = skip diff-coverage."
+    required: false
+    default: ""
+  base-ref:
+    description: "Base ref for diff-coverage (e.g., origin/development)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate GitHub App token
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-pem }}
+        owner: Pulsar-Anvil-Studios
+
+    - name: Configure git for private deps
+      shell: bash
+      run: |
+        git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: llvm-tools-preview
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@nextest
+
+    # No sccache — conflicts with llvm-cov's RUSTC_WRAPPER instrumentation
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: true
+        cache-all-crates: true
+
+    - name: Test with coverage
+      shell: bash
+      env:
+        CARGO_TERM_COLOR: always
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: |
+        cargo llvm-cov nextest --profile ci --all-features --workspace --lcov --output-path lcov.info \
+          --ignore-filename-regex 'lambdas/.*/src/main\.rs'
+
+    - name: Diff coverage (PR only)
+      if: inputs.pr-number != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        bash ${{ github.action_path }}/../rust-check/diff-coverage.sh \
+          lcov.info \
+          "${{ inputs.base-ref }}" \
+          "${{ inputs.pr-number }}" \
+          "${{ inputs.coverage-threshold }}"
+
+    - name: Enforce global coverage
+      shell: bash
+      run: |
+        cargo llvm-cov report \
+          --fail-under-lines ${{ inputs.coverage-threshold }} \
+          --ignore-filename-regex 'lambdas/.*/src/main\.rs'
+
+    - name: Coverage summary
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        cargo llvm-cov report \
+          --ignore-filename-regex 'lambdas/.*/src/main\.rs' 2>&1 \
+          | tail -20 >> "$GITHUB_STEP_SUMMARY"
