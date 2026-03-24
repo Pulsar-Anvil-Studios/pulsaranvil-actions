@@ -75,7 +75,6 @@ runs:
         set +e
         cargo mutants \
           --in-diff /tmp/pr.diff \
-          --in-place \
           --test-tool ${{ inputs.test-tool }} \
           --timeout-multiplier ${{ inputs.timeout-multiplier }} \
           ${{ inputs.extra-args }}
@@ -117,6 +116,17 @@ runs:
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Fail on missed mutants
-      if: steps.mutants.outputs.exit-code == '2' || steps.mutants.outputs.exit-code == '4'
       shell: bash
-      run: exit 1
+      run: |
+        case "${{ steps.mutants.outputs.exit-code }}" in
+          0|3)
+            exit 0
+            ;;
+          2|4)
+            exit 1
+            ;;
+          *)
+            echo "::error::Unexpected cargo-mutants exit code: ${{ steps.mutants.outputs.exit-code }}"
+            exit 1
+            ;;
+        esac
