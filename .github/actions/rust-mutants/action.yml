@@ -1,0 +1,122 @@
+name: "Rust Mutation Testing (PR Diff)"
+description: "Run cargo-mutants on PR diff to detect surviving mutants"
+
+inputs:
+  github-app-id:
+    description: "GitHub App ID for private repo access (optional for public repos)"
+    required: false
+    default: ""
+  github-app-pem:
+    description: "GitHub App PEM private key (optional for public repos)"
+    required: false
+    default: ""
+  base-ref:
+    description: "Base ref for diff (e.g., origin/development)"
+    required: true
+  test-tool:
+    description: "Test tool to use (nextest or cargo)"
+    required: false
+    default: "nextest"
+  timeout-multiplier:
+    description: "Timeout multiplier for mutant runs"
+    required: false
+    default: "3"
+  extra-args:
+    description: "Additional arguments to pass to cargo mutants"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate GitHub App token
+      if: inputs.github-app-id != '' && inputs.github-app-pem != ''
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-pem }}
+        owner: Pulsar-Anvil-Studios
+
+    - name: Configure git for private deps
+      if: steps.app-token.outcome == 'success'
+      shell: bash
+      run: |
+        git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-mutants
+      uses: taiki-e/install-action@cargo-mutants
+
+    - name: Install cargo-nextest
+      if: inputs.test-tool == 'nextest'
+      uses: taiki-e/install-action@nextest
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: true
+        cache-all-crates: true
+
+    - name: Generate PR diff
+      shell: bash
+      run: |
+        git diff ${{ inputs.base-ref }}...HEAD > /tmp/pr.diff
+        echo "Diff size: $(wc -c < /tmp/pr.diff) bytes, files: $(grep -c '^diff --git' /tmp/pr.diff || echo 0)"
+
+    - name: Run mutation testing
+      id: mutants
+      shell: bash
+      env:
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: |
+        set +e
+        cargo mutants \
+          --in-diff /tmp/pr.diff \
+          --in-place \
+          --test-tool ${{ inputs.test-tool }} \
+          --timeout-multiplier ${{ inputs.timeout-multiplier }} \
+          ${{ inputs.extra-args }}
+        EXIT_CODE=$?
+        set -e
+
+        echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+        case $EXIT_CODE in
+          0) echo "All mutants were caught!" ;;
+          2) echo "::error::Some mutants survived -- review missed.txt below." ;;
+          3) echo "::warning::Some mutants timed out (not a failure)." ;;
+          4) echo "::error::Baseline test run failed. Fix tests first." ;;
+          *) echo "::error::Unexpected cargo-mutants exit code: $EXIT_CODE" ;;
+        esac
+
+    - name: Mutation testing summary
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        CAUGHT=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
+        MISSED=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
+        TIMEOUT=$(wc -l < mutants.out/timeout.txt 2>/dev/null || echo 0)
+        {
+          echo "## Mutation Testing Results"
+          echo ""
+          echo "| Metric | Count |"
+          echo "|--------|-------|"
+          echo "| Caught | $CAUGHT |"
+          echo "| Missed | $MISSED |"
+          echo "| Timeout | $TIMEOUT |"
+          if [ "$MISSED" -gt 0 ]; then
+            echo ""
+            echo "### Missed Mutants"
+            echo '```'
+            cat mutants.out/missed.txt
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Fail on missed mutants
+      if: steps.mutants.outputs.exit-code == '2' || steps.mutants.outputs.exit-code == '4'
+      shell: bash
+      run: exit 1
