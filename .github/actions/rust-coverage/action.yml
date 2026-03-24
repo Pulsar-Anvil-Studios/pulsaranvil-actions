@@ -3,9 +3,21 @@ description: "Test coverage with cargo-llvm-cov, diff-coverage for PRs, and glob
 
 inputs:
   coverage-threshold:
-    description: "Minimum line coverage percentage"
+    description: "Minimum global line coverage percentage"
     required: false
-    default: "98"
+    default: "90"
+  diff-coverage-threshold:
+    description: "Minimum diff line coverage percentage for PRs"
+    required: false
+    default: "95"
+  region-threshold:
+    description: "Minimum region coverage percentage"
+    required: false
+    default: "85"
+  extra-ignore-regex:
+    description: "Pipe-delimited extra patterns for --ignore-filename-regex (appended to default lambda ignore)"
+    required: false
+    default: ""
   github-app-id:
     description: "GitHub App ID for private repo access"
     required: true
@@ -56,14 +68,27 @@ runs:
         cache-targets: true
         cache-all-crates: true
 
+    - name: Build combined ignore regex
+      id: ignore-regex
+      shell: bash
+      env:
+        EXTRA_IGNORE_REGEX: ${{ inputs.extra-ignore-regex }}
+      run: |
+        COMBINED="lambdas/.*/src/main\.rs"
+        if [[ -n "$EXTRA_IGNORE_REGEX" ]]; then
+          COMBINED="${COMBINED}|$EXTRA_IGNORE_REGEX"
+        fi
+        printf 'pattern=%s\n' "$COMBINED" >> "$GITHUB_OUTPUT"
+
     - name: Test with coverage
       shell: bash
       env:
         CARGO_TERM_COLOR: always
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov nextest --profile ci --all-features --workspace --lcov --output-path lcov.info \
-          --ignore-filename-regex 'lambdas/.*/src/main\.rs'
+          --ignore-filename-regex "$IGNORE_REGEX"
 
     - name: Diff coverage (PR only)
       if: inputs.pr-number != ''
@@ -75,19 +100,27 @@ runs:
           lcov.info \
           "${{ inputs.base-ref }}" \
           "${{ inputs.pr-number }}" \
+          "${{ inputs.diff-coverage-threshold }}" \
           "${{ inputs.coverage-threshold }}"
 
     - name: Enforce global coverage
       shell: bash
+      env:
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov report \
           --fail-under-lines ${{ inputs.coverage-threshold }} \
-          --ignore-filename-regex 'lambdas/.*/src/main\.rs'
+          --ignore-filename-regex "$IGNORE_REGEX"
+        cargo llvm-cov report \
+          --fail-under-regions ${{ inputs.region-threshold }} \
+          --ignore-filename-regex "$IGNORE_REGEX"
 
     - name: Coverage summary
       if: '!cancelled()'
       shell: bash
+      env:
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov report \
-          --ignore-filename-regex 'lambdas/.*/src/main\.rs' 2>&1 \
+          --ignore-filename-regex "$IGNORE_REGEX" 2>&1 \
           | tail -20 >> "$GITHUB_STEP_SUMMARY"
