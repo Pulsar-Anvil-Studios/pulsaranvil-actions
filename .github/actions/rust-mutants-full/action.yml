@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   fail-on-survivors:
-    description: "When true, fail the action if mutants survive or the baseline test run fails"
+    description: "When true, fail the action if mutants survive; baseline failures and unexpected errors still fail"
     required: false
     default: "false"
 
@@ -81,7 +81,6 @@ runs:
         set +e
         cargo mutants \
           --shard ${{ inputs.shard }}/${{ inputs.total-shards }} \
-          --in-place \
           --test-tool ${{ inputs.test-tool }} \
           --timeout-multiplier ${{ inputs.timeout-multiplier }} \
           ${{ inputs.extra-args }}
@@ -115,10 +114,39 @@ runs:
         TIMEOUT=$(wc -l < mutants.out/timeout.txt 2>/dev/null || echo 0)
         {
           echo "## Mutation Testing Shard ${{ inputs.shard }}/${{ inputs.total-shards }}"
-          echo "Caught: $CAUGHT | Missed: $MISSED | Timeout: $TIMEOUT"
+          echo ""
+          echo "| Metric | Count |"
+          echo "|--------|-------|"
+          echo "| Caught | $CAUGHT |"
+          echo "| Missed | $MISSED |"
+          echo "| Timeout | $TIMEOUT |"
+          if [ "$MISSED" -gt 0 ]; then
+            echo ""
+            echo "### Missed Mutants"
+            echo '```'
+            cat mutants.out/missed.txt
+            echo '```'
+          fi
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Fail on missed mutants
-      if: inputs.fail-on-survivors == 'true' && (steps.mutants.outputs.exit-code == '2' || steps.mutants.outputs.exit-code == '4')
       shell: bash
-      run: exit 1
+      run: |
+        case "${{ steps.mutants.outputs.exit-code }}" in
+          0|3)
+            exit 0
+            ;;
+          2)
+            if [[ "${{ inputs.fail-on-survivors }}" == 'true' ]]; then
+              exit 1
+            fi
+            exit 0
+            ;;
+          4)
+            exit 1
+            ;;
+          *)
+            echo "::error::Unexpected cargo-mutants exit code: ${{ steps.mutants.outputs.exit-code }}"
+            exit 1
+            ;;
+        esac
