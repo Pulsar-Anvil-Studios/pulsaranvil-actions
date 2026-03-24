@@ -1,0 +1,152 @@
+name: "Rust Mutation Testing (Full)"
+description: "Run cargo-mutants on entire codebase with sharding support"
+
+inputs:
+  github-app-id:
+    description: "GitHub App ID for private repo access (optional)"
+    required: false
+    default: ""
+  github-app-pem:
+    description: "GitHub App PEM private key (optional)"
+    required: false
+    default: ""
+  shard:
+    description: "Current shard index (1-based)"
+    required: true
+  total-shards:
+    description: "Total number of shards"
+    required: true
+  test-tool:
+    description: "Test tool to use (nextest or cargo)"
+    required: false
+    default: "nextest"
+  timeout-multiplier:
+    description: "Timeout multiplier for mutant runs"
+    required: false
+    default: "3"
+  extra-args:
+    description: "Additional arguments to pass to cargo mutants"
+    required: false
+    default: ""
+  fail-on-survivors:
+    description: "When true, fail the action if mutants survive; baseline failures and unexpected errors still fail"
+    required: false
+    default: "false"
+
+outputs:
+  exit-code:
+    description: "cargo-mutants exit code for the shard run"
+    value: ${{ steps.mutants.outputs.exit-code }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate GitHub App token
+      if: inputs.github-app-id != '' && inputs.github-app-pem != ''
+      id: app-token
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ inputs.github-app-id }}
+        private-key: ${{ inputs.github-app-pem }}
+        owner: Pulsar-Anvil-Studios
+
+    - name: Configure git for private deps
+      if: steps.app-token.outcome == 'success'
+      shell: bash
+      run: |
+        git config --global url."https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/".insteadOf "https://github.com/"
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-mutants
+      uses: taiki-e/install-action@cargo-mutants
+
+    - name: Install cargo-nextest
+      if: inputs.test-tool == 'nextest'
+      uses: taiki-e/install-action@nextest
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: true
+        cache-all-crates: true
+
+    - name: Run full mutation testing (shard ${{ inputs.shard }}/${{ inputs.total-shards }})
+      id: mutants
+      shell: bash
+      env:
+        CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      run: |
+        set +e
+        cargo mutants \
+          --shard ${{ inputs.shard }}/${{ inputs.total-shards }} \
+          --test-tool ${{ inputs.test-tool }} \
+          --timeout-multiplier ${{ inputs.timeout-multiplier }} \
+          ${{ inputs.extra-args }}
+        EXIT_CODE=$?
+        set -e
+
+        echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+        case $EXIT_CODE in
+          0) echo "All mutants were caught!" ;;
+          2) echo "::error::Some mutants survived -- review missed.txt in the shard artifact." ;;
+          3) echo "::warning::Some mutants timed out (not a failure while informational)." ;;
+          4) echo "::error::Baseline test run failed. Fix tests first." ;;
+          *) echo "::error::Unexpected cargo-mutants exit code: $EXIT_CODE" ;;
+        esac
+
+    - name: Upload mutation results
+      if: '!cancelled()'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mutants-shard-${{ inputs.shard }}
+        path: mutants.out/
+        retention-days: 7
+
+    - name: Shard summary
+      if: '!cancelled()'
+      shell: bash
+      run: |
+        CAUGHT=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
+        MISSED=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
+        TIMEOUT=$(wc -l < mutants.out/timeout.txt 2>/dev/null || echo 0)
+        {
+          echo "## Mutation Testing Shard ${{ inputs.shard }}/${{ inputs.total-shards }}"
+          echo ""
+          echo "| Metric | Count |"
+          echo "|--------|-------|"
+          echo "| Caught | $CAUGHT |"
+          echo "| Missed | $MISSED |"
+          echo "| Timeout | $TIMEOUT |"
+          if [ "$MISSED" -gt 0 ]; then
+            echo ""
+            echo "### Missed Mutants"
+            echo '```'
+            cat mutants.out/missed.txt
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Fail on missed mutants
+      shell: bash
+      run: |
+        case "${{ steps.mutants.outputs.exit-code }}" in
+          0|3)
+            exit 0
+            ;;
+          2)
+            if [[ "${{ inputs.fail-on-survivors }}" == 'true' ]]; then
+              exit 1
+            fi
+            exit 0
+            ;;
+          4)
+            exit 1
+            ;;
+          *)
+            echo "::error::Unexpected cargo-mutants exit code: ${{ steps.mutants.outputs.exit-code }}"
+            exit 1
+            ;;
+        esac
