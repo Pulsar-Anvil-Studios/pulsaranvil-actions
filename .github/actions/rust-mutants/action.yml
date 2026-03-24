@@ -48,7 +48,9 @@ runs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Install cargo-mutants
-      uses: taiki-e/install-action@cargo-mutants
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-mutants
 
     - name: Install cargo-nextest
       if: inputs.test-tool == 'nextest'
