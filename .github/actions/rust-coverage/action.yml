@@ -71,21 +71,24 @@ runs:
     - name: Build combined ignore regex
       id: ignore-regex
       shell: bash
+      env:
+        EXTRA_IGNORE_REGEX: ${{ inputs.extra-ignore-regex }}
       run: |
         COMBINED="lambdas/.*/src/main\.rs"
-        if [[ -n "${{ inputs.extra-ignore-regex }}" ]]; then
-          COMBINED="${COMBINED}|${{ inputs.extra-ignore-regex }}"
+        if [[ -n "$EXTRA_IGNORE_REGEX" ]]; then
+          COMBINED="${COMBINED}|$EXTRA_IGNORE_REGEX"
         fi
-        echo "pattern=$COMBINED" >> "$GITHUB_OUTPUT"
+        printf 'pattern=%s\n' "$COMBINED" >> "$GITHUB_OUTPUT"
 
     - name: Test with coverage
       shell: bash
       env:
         CARGO_TERM_COLOR: always
         CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov nextest --profile ci --all-features --workspace --lcov --output-path lcov.info \
-          --ignore-filename-regex '${{ steps.ignore-regex.outputs.pattern }}'
+          --ignore-filename-regex "$IGNORE_REGEX"
 
     - name: Diff coverage (PR only)
       if: inputs.pr-number != ''
@@ -102,18 +105,22 @@ runs:
 
     - name: Enforce global coverage
       shell: bash
+      env:
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov report \
           --fail-under-lines ${{ inputs.coverage-threshold }} \
-          --ignore-filename-regex '${{ steps.ignore-regex.outputs.pattern }}'
+          --ignore-filename-regex "$IGNORE_REGEX"
         cargo llvm-cov report \
           --fail-under-regions ${{ inputs.region-threshold }} \
-          --ignore-filename-regex '${{ steps.ignore-regex.outputs.pattern }}'
+          --ignore-filename-regex "$IGNORE_REGEX"
 
     - name: Coverage summary
       if: '!cancelled()'
       shell: bash
+      env:
+        IGNORE_REGEX: ${{ steps.ignore-regex.outputs.pattern }}
       run: |
         cargo llvm-cov report \
-          --ignore-filename-regex '${{ steps.ignore-regex.outputs.pattern }}' 2>&1 \
+          --ignore-filename-regex "$IGNORE_REGEX" 2>&1 \
           | tail -20 >> "$GITHUB_STEP_SUMMARY"

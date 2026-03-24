@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # diff-coverage.sh — Compute diff coverage from lcov and post PR comment
-# Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [threshold]
+# Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [diff-threshold] [global-threshold]
 
-LCOV_FILE="${1:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [threshold]}"
-BASE_SHA="${2:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [threshold]}"
-PR_NUMBER="${3:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [threshold]}"
+LCOV_FILE="${1:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [diff-threshold] [global-threshold]}"
+BASE_SHA="${2:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [diff-threshold] [global-threshold]}"
+PR_NUMBER="${3:?Usage: diff-coverage.sh <lcov-file> <base-sha> <pr-number> [diff-threshold] [global-threshold]}"
 THRESHOLD="${4:-98}"
 GLOBAL_THRESHOLD="${5:-$THRESHOLD}"
 
