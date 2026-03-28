@@ -88,18 +88,22 @@ runs:
         case $EXIT_CODE in
           0) echo "All mutants were caught!" ;;
           2) echo "::error::Some mutants survived -- review missed.txt below." ;;
-          3) echo "::warning::Some mutants timed out (not a failure)." ;;
+          3) echo "::warning::Some mutants timed out; final result depends on whether any mutants survived." ;;
           4) echo "::error::Baseline test run failed. Fix tests first." ;;
           *) echo "::error::Unexpected cargo-mutants exit code: $EXIT_CODE" ;;
         esac
 
     - name: Mutation testing summary
+      id: summary
       if: '!cancelled()'
       shell: bash
       run: |
         CAUGHT=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
         MISSED=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
         TIMEOUT=$(wc -l < mutants.out/timeout.txt 2>/dev/null || echo 0)
+        echo "caught-count=$CAUGHT" >> "$GITHUB_OUTPUT"
+        echo "missed-count=$MISSED" >> "$GITHUB_OUTPUT"
+        echo "timeout-count=$TIMEOUT" >> "$GITHUB_OUTPUT"
         {
           echo "## Mutation Testing Results"
           echo ""
@@ -121,11 +125,19 @@ runs:
       shell: bash
       run: |
         case "${{ steps.mutants.outputs.exit-code }}" in
-          0|3)
+          0)
             exit 0
             ;;
           2|4)
             exit 1
+            ;;
+          3)
+            if [ "${{ steps.summary.outputs.missed-count }}" -gt 0 ]; then
+              echo "::error::Mutation testing timed out and also left surviving mutants."
+              exit 1
+            fi
+            echo "::warning::Some mutants timed out, but none survived."
+            exit 0
             ;;
           *)
             echo "::error::Unexpected cargo-mutants exit code: ${{ steps.mutants.outputs.exit-code }}"
