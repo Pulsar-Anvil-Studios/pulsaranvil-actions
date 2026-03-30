@@ -21,9 +21,13 @@ inputs:
     required: false
     default: "nextest"
   timeout-multiplier:
-    description: "Timeout multiplier for mutant runs"
+    description: "Timeout multiplier for mutant runs (ignored when timeout is set)"
     required: false
     default: "3"
+  timeout:
+    description: "Explicit test timeout in seconds (use with --baseline=skip; conflicts with timeout-multiplier)"
+    required: false
+    default: ""
   extra-args:
     description: "Additional arguments to pass to cargo mutants"
     required: false
@@ -84,7 +88,7 @@ runs:
         cargo mutants \
           --shard ${{ inputs.shard }}/${{ inputs.total-shards }} \
           --test-tool ${{ inputs.test-tool }} \
-          --timeout-multiplier ${{ inputs.timeout-multiplier }} \
+          ${{ inputs.timeout != '' && format('--timeout {0}', inputs.timeout) || format('--timeout-multiplier {0}', inputs.timeout-multiplier) }} \
           ${{ inputs.extra-args }}
         EXIT_CODE=$?
         set -e
