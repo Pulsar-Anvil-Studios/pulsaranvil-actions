@@ -25,9 +25,13 @@ inputs:
     required: false
     default: "3"
   timeout:
-    description: "Explicit test timeout in seconds (use with --baseline=skip; conflicts with timeout-multiplier)"
+    description: "Explicit test timeout in seconds (conflicts with timeout-multiplier)"
     required: false
-    default: ""
+    default: "30"
+  jobs:
+    description: "Number of parallel mutant jobs"
+    required: false
+    default: "2"
   extra-args:
     description: "Additional arguments to pass to cargo mutants"
     required: false
@@ -89,7 +93,11 @@ runs:
           --shard ${{ inputs.shard }}/${{ inputs.total-shards }} \
           --test-tool ${{ inputs.test-tool }} \
           ${{ inputs.timeout != '' && format('--timeout {0}', inputs.timeout) || format('--timeout-multiplier {0}', inputs.timeout-multiplier) }} \
-          ${{ inputs.extra-args }}
+          --baseline=skip \
+          -vV \
+          --jobs ${{ inputs.jobs }} \
+          ${{ inputs.extra-args }} \
+          -- --all-targets
         EXIT_CODE=$?
         set -e
 
