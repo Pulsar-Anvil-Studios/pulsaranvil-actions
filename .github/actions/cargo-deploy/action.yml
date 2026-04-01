@@ -86,7 +86,7 @@ runs:
 
     - name: CDK deploy
       shell: bash
-      run: cd cdk && bunx cdk deploy -c env=${{ inputs.environment }} --require-approval never
+      run: cd cdk && bunx cdk deploy --all -c env=${{ inputs.environment }} --require-approval never
       env:
         CDK_DEFAULT_ACCOUNT: ${{ inputs.account-id }}
         CDK_DEFAULT_REGION: ${{ inputs.aws-region }}
