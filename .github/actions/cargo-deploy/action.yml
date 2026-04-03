@@ -43,6 +43,12 @@ runs:
       with:
         targets: aarch64-unknown-linux-gnu
 
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        cache-targets: true
+        cache-all-crates: true
+
     - name: Install cargo-lambda
       shell: bash
       run: pip install cargo-lambda==1.9.1
